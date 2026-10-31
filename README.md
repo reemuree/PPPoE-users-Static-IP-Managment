@@ -1,231 +1,213 @@
 # MikroTik PPPoE IP Allocation Manager
 
-A lightweight, **read-only** web dashboard for ISP administrators. It reads `/ip/route`, `/ppp/secret`
-and `/ppp/active` from a MikroTik router over the RouterOS API and shows which IPs in your customer
-networks are assigned, free, reserved, in conflict, or used by sessions that have no matching secret.
+<p align="center">
+  <b>A lightweight and professional IP allocation management dashboard for MikroTik ISP networks.</b>
+</p>
 
-Stack: Flask · librouteros · SQLite (settings + admin login only) · Chart.js (bundled) · vanilla JS.
-
-```
-app.py            Flask app: auth, CSRF, API, CSV export, cached snapshot
-router_client.py  RouterOS API access (read-only) + connectivity test
-ip_analyzer.py    IP classification logic (pure Python, no I/O)
-templates/        index.html (app), login.html
-static/           css/style.css, js/app.js, js/vendor/chart.umd.js
-```
-
-## How IPs are classified
-
-| Status | Meaning |
-|---|---|
-| **Assigned** | Exactly one *enabled* PPP secret has this `remote-address`. |
-| **Free** | No enabled secret, active session, conflict or reservation uses it. |
-| **Reserved** | Excluded by you on the Networks page. |
-| **Conflict** | Two or more enabled secrets share the IP, or a session by a different user holds a secret's IP. |
-| **Active unconfigured** | An active PPP session uses the IP but no enabled secret has it. |
-| **Unknown** | Router data is stale or incomplete, so Free cannot be verified. |
-| Out of range | Not a row status: secrets outside all monitored networks are listed under **Reports**. |
-
-> **“Free” means free from known PPPoE assignments and monitored conflicts.** It does not guarantee the
-> address is unused by other services (static hosts, DHCP, servers, NAT pools…). Use **Reserved** for those.
-
-**Route / table column:** each IP shows the matching `/ip route` entry: the per-user host route
-(`10.10.0.16/32 → <pppoe-user015>`) when the router has one, otherwise the network route that covers it
-(`10.10.0.0/24 → bridge1`), plus its routing table (`routing-table` on RouterOS v7, `routing-mark` on v6; `main` if unset).
-
-**User traffic:** click a username to open a side panel with the session's **Download** (router → user, interface `tx`)
-and **Upload** (user → router, interface `rx`): current rate and totals since the session started, refreshed every 5 s
-while the panel is open. It reads the dynamic interface `<pppoe-USERNAME>` and runs `/interface/monitor-traffic once`
-(read-only). If your PPPoE server uses different interface names, traffic will show "No PPPoE interface found".
-
-Other rules: disabled secrets never claim an IP and are listed separately; default routes and `/32`
-host routes are never offered as networks; overlapping networks never produce duplicate rows; secrets whose
-`remote-address` is a pool name are counted as *dynamic* and not shown as assignments.
-
-**Stale data:** if the router becomes unreachable, the last good snapshot is kept and clearly marked stale.
-Would-be Free IPs turn Unknown, and the Free list and Free CSV export are refused until the router responds.
+<p align="center">
+  Monitor PPPoE users, track static IP assignments, detect conflicts, and manage your IP address inventory from one centralized dashboard.
+</p>
 
 ---
 
-## 1. Prepare the MikroTik router (read-only access)
+## 📌 Overview
 
-Run in RouterOS (replace `<server-ip>` with the address of the machine running this app):
+**MikroTik PPPoE IP Allocation Manager** is a web-based dashboard developed for Internet Service Providers (ISPs) to simplify static IP allocation monitoring and management.
 
-```
-/user group add name=api-ro policy=read,api,!local,!telnet,!ssh,!ftp,!reboot,!write,!policy,!test,!winbox,!password,!web,!sniff,!sensitive,!romon
-/user add name=ipmgr group=api-ro password=<strong-password> address=<server-ip>/32
-/ip service set api disabled=no address=<server-ip>/32
-```
+The application connects to MikroTik RouterOS through its API and collects information from PPPoE secrets, active sessions, and routing tables.
 
-The `ipmgr` user cannot change configuration. For encrypted API, enable `api-ssl` (port 8729) with a
-certificate and set `ROUTER_USE_SSL=true` below.
+Instead of manually checking multiple RouterOS menus, administrators can view their IP allocation status, identify duplicate assignments, monitor available addresses, and manage their network inventory through a clean and responsive interface.
 
-## 2. Install on Ubuntu Server
+**The application uses read-only RouterOS API access and does not modify router configurations.**
 
-```bash
-sudo apt update && sudo apt install -y python3 python3-venv python3-pip git
-sudo mkdir -p /opt/pppoe-ip-manager && sudo chown $USER: /opt/pppoe-ip-manager
-cp -r . /opt/pppoe-ip-manager/ && cd /opt/pppoe-ip-manager   # or git clone your repository here
+## ✨ Key Features
 
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+- **Static IP Management** — Track static IP addresses assigned to PPPoE users.
+- **Automatic Conflict Detection** — Identify duplicate IP assignments and IP collisions involving active sessions.
+- **IP Pool Monitoring** — Expand administrator-selected CIDR blocks and monitor available IP addresses.
+- **Free & Assigned IP Tracking** — Get a clear overview of free, assigned, and reserved IP addresses.
+- **Live PPPoE Monitoring** — Compare active PPPoE sessions with configured PPP secrets.
+- **Read-Only Router Integration** — Retrieve network information without changing router configurations.
+- **Real-Time Dashboard** — Monitor network IP allocation statistics.
+- **Interactive Charts** — Visualize IP allocation using Doughnut charts.
+- **Searchable Inventory** — Search and sort IP allocation records.
+- **Quick Filters** — Filter IP addresses and allocation statuses from the sidebar.
+- **CSV Export** — Export IP inventory data for external analysis.
+- **Background Synchronization** — Automatically synchronize router data every 30 seconds.
+- **Responsive Interface** — Access the dashboard from desktop and mobile devices.
 
-cp .env.example .env
-chmod 600 .env
-nano .env            # set ROUTER_HOST, ROUTER_USER, ROUTER_PASSWORD, ADMIN_PASSWORD (10+ chars)
-```
+## 🖥️ Dashboard Preview
 
-### Test the router connection
+<!-- Add your dashboard screenshot here -->
+<!-- Example: ![Dashboard Preview](screenshots/dashboard.png) -->
 
-```bash
-python router_client.py
-# OK  192.168.88.1:8728  (45 ms)
-#   routes:         23
-#   ppp secrets:    412
-#   active sessions:389
-```
+## 🛠️ Technology Stack
 
-Failures are reported by type: `connection` (unreachable/timeout), `auth` (wrong user or password),
-`permission` (user lacks `read`/`api`), `config` (missing `.env` values).
-
-### Run (development)
-
-```bash
-python app.py                 # http://127.0.0.1:5000
-```
-
-Open the page, sign in with `ADMIN_USER` / `ADMIN_PASSWORD`, go to **Networks**, tick the customer
-networks to monitor, and press **Save and apply**. Afterwards remove `ADMIN_PASSWORD` from `.env`
-(the account lives hashed in `instance/app.db`). Add or reset an admin any time with
-`python app.py create-admin`.
-
-To reach it from another machine during testing set `HOST=0.0.0.0` in `.env`, and allow the port in your
-firewall. For anything beyond testing, use the production setup below.
-
-## 3. Production deployment (Ubuntu)
-
-Use **one** gunicorn worker with threads: the router snapshot cache and login throttling live in process memory,
-so multiple workers would each query the router separately.
-
-`/etc/systemd/system/pppoe-ip-manager.service`
-
-```ini
-[Unit]
-Description=PPPoE IP Manager
-After=network-online.target
-
-[Service]
-User=ipmgr
-Group=ipmgr
-WorkingDirectory=/opt/pppoe-ip-manager
-EnvironmentFile=/opt/pppoe-ip-manager/.env
-ExecStart=/opt/pppoe-ip-manager/.venv/bin/gunicorn -w 1 --threads 4 -b 127.0.0.1:8000 --timeout 60 app:app
-Restart=on-failure
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=full
-ReadWritePaths=/opt/pppoe-ip-manager/instance
-
-[Install]
-WantedBy=multi-user.target
-```
-
-```bash
-sudo useradd --system --home /opt/pppoe-ip-manager --shell /usr/sbin/nologin ipmgr
-sudo chown -R ipmgr:ipmgr /opt/pppoe-ip-manager
-sudo chmod 600 /opt/pppoe-ip-manager/.env
-sudo systemctl daemon-reload && sudo systemctl enable --now pppoe-ip-manager
-sudo journalctl -u pppoe-ip-manager -f
-```
-
-Put nginx in front for HTTPS (`sudo apt install -y nginx certbot python3-certbot-nginx`):
-
-```nginx
-server {
-    listen 80;
-    server_name ipmgr.example.com;
-    location / {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_read_timeout 60s;
-    }
-}
-```
-
-```bash
-sudo certbot --nginx -d ipmgr.example.com
-```
-
-Then set `BEHIND_PROXY=true` and `SESSION_COOKIE_SECURE=true` in `.env` and `sudo systemctl restart pppoe-ip-manager`.
-If the app is only reachable on a private LAN without HTTPS, leave `SESSION_COOKIE_SECURE=false`.
-
-Hardening checklist: restrict the app port to admin networks with `ufw`; keep the MikroTik API service limited to
-the server's IP; keep `.env` and `instance/` readable only by the service user; back up `instance/app.db`.
-
-## 4. Windows setup (brief)
-
-```powershell
-cd C:\pppoe-ip-manager
-py -3 -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-copy .env.example .env
-notepad .env
-python router_client.py
-python app.py
-```
-
-For a long-running service use `waitress` (installed automatically on Windows):
-`waitress-serve --listen=127.0.0.1:8000 app:app`, run it with NSSM or Task Scheduler, and put IIS or nginx in
-front if you need HTTPS.
-
-## Configuration reference (`.env`)
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `ROUTER_HOST`, `ROUTER_USER`, `ROUTER_PASSWORD` | required | Read-only RouterOS API login |
-| `ROUTER_PORT` | 8728 (8729 with SSL) | API port |
-| `ROUTER_TIMEOUT` | 10 | Seconds before a router call fails |
-| `ROUTER_USE_SSL`, `ROUTER_SSL_VERIFY` | false | Use api-ssl; verify its certificate |
-| `HOST`, `PORT` | 127.0.0.1, 5000 | Dev server bind address |
-| `SECRET_KEY` | auto | Session signing key (auto-generated into `instance/secret_key`) |
-| `SESSION_COOKIE_SECURE` | false | Set true behind HTTPS |
-| `BEHIND_PROXY` | false | Trust one reverse proxy for client IP/scheme |
-| `ADMIN_USER`, `ADMIN_PASSWORD` | admin, empty | First-run admin (10+ chars) |
-| `DATABASE_PATH` | instance/app.db | SQLite file (keep outside any public directory) |
-| `MAX_ADDRESSES` | 65536 | Default cap on monitored addresses (editable in the UI) |
-| `CACHE_TTL` | 15 | Seconds a router snapshot is reused before re-reading |
-
-## API (all require login; POST/PUT require the CSRF token)
-
-`GET /api/status` · `POST /api/sync` · `GET /api/dashboard` · `GET /api/inventory` ·
-`GET /api/assigned` · `GET /api/free` · `GET /api/user/<username>` · `GET /api/reports` · `GET|PUT /api/networks` ·
-`GET /api/export.csv?scope=all|assigned|free`
-
-Inventory accepts `q`, `status`, `network`, `sort`, `dir`, `page`, `page_size`. Credentials are never included in any response.
-
-## Security notes
-
-- Router credentials are only read from the server environment; they are never sent to the browser or logged.
-- Admin passwords are stored with salted scrypt hashes; login is rate limited; sessions are HttpOnly, SameSite=Lax.
-- Every state-changing request needs a CSRF token. A strict Content-Security-Policy allows only same-origin scripts and styles.
-- Router-supplied text is rendered with DOM text nodes, never as HTML. CSV cells starting with `= + - @` are neutralised.
-- The app only calls `print`-style reads on the router. It never adds, edits or removes router configuration.
-- `localStorage` holds only UI preferences (theme, network filter, page size, search, status filter, auto-refresh).
-
-## Troubleshooting
-
-| Symptom | Check |
+| Component | Technology |
 |---|---|
-| “Cannot reach router” | `ROUTER_HOST`/port, `/ip service` API enabled, its `address=` list includes the server, firewall |
-| “rejected the username or password” | `ROUTER_USER`/`ROUTER_PASSWORD`; user's `address=` must include the server IP |
-| “lacks permission” | The router group needs `read` and `api` policies |
-| Traffic panel says “cannot read /interface” | The API user's group needs the `read` policy (the sample group has it) |
-| TLS handshake error | Use the `api-ssl` port 8729 with a certificate, or set `ROUTER_USE_SSL=false` for port 8728 |
-| Dashboard asks to select networks | Open **Networks**, tick the ranges, **Save and apply** |
-| “above the limit” on save | Choose smaller networks or raise the address limit on the Networks page |
-| Cannot log in | Run `python app.py create-admin` |
+| Backend | Python 3 |
+| Web Framework | Flask |
+| Router API | librouteros |
+| Database | SQLite |
+| Frontend | HTML5, CSS3 |
+| JavaScript | Vanilla JavaScript (ES6+) |
+| Charts | Chart.js |
+| Data Export | CSV |
+
+**No JavaScript frameworks or Node.js required.**
+
+## 📋 Prerequisites
+
+Before installing, make sure you have:
+
+- Ubuntu Server 22.04 / 24.04 LTS or Windows
+- Python 3.8 or higher
+- MikroTik RouterOS v6 or v7
+- RouterOS API access enabled
+- A dedicated MikroTik API user with **read-only permissions**
+- Network connectivity between the application server and MikroTik router
+
+## 🚀 Installation Guide
+
+### 1. Install System Dependencies
+
+For Ubuntu Server:
+
+```bash
+sudo apt update
+sudo apt install -y python3 python3-venv python3-pip git
+```
+
+### 2. Clone the Repository
+
+```bash
+git clone YOUR_GITHUB_REPOSITORY_URL
+cd YOUR_PROJECT_FOLDER
+```
+
+Replace the repository URL and folder name with your actual project details.
+
+### 3. Create a Python Virtual Environment
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+```
+
+### 4. Install Python Dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+### 5. Configure MikroTik API Access
+
+Enable API access on your MikroTik router:
+
+```routeros
+/ip service enable api
+```
+
+Create a dedicated read-only user and assign it to a group with appropriate read permissions.
+
+Example:
+
+```routeros
+/user group add name=ip-manager-read policy=read,api
+/user add name=ipmanager group=ip-manager-read password=YOUR_STRONG_PASSWORD
+```
+
+For production environments, restrict API access to the application server's IP address using MikroTik firewall rules. Do not expose the API service publicly.
+
+### 6. Configure the Application
+
+Update the router connection settings according to your project's configuration method.
+
+You will need:
+
+- MikroTik Router IP address
+- API Port
+- API Username
+- API Password
+
+Keep credentials private. Never commit real router passwords or sensitive configuration files to GitHub.
+
+### 7. Run the Application
+
+Use your project's configured Flask entry point. For example:
+
+```bash
+python3 app.py
+```
+
+Open the dashboard in your browser using the address and port configured by the application.
+
+## 🔐 Security
+
+Security is important when managing ISP network infrastructure.
+
+- Use a dedicated RouterOS API account.
+- Grant only the permissions required for reading network information.
+- Restrict API access to trusted IP addresses.
+- Use strong passwords.
+- Keep router credentials out of source code and public repositories.
+- Use HTTPS when exposing the dashboard beyond a trusted local network.
+
+## 💾 Data & Synchronization
+
+The application uses SQLite for storing application settings.
+
+Router information is retrieved through the MikroTik API and synchronized in the background at 30-second intervals.
+
+The dashboard provides an updated view of IP allocation based on the collected router information.
+
+## 🎯 Designed For
+
+- Internet Service Providers (ISPs)
+- MikroTik Network Administrators
+- PPPoE Network Operators
+- Network Engineers
+- ISP Technical Support Teams
+
+## 🗺️ Future Improvements
+
+Possible future enhancements:
+
+- Multiple MikroTik router support
+- IP allocation history
+- Advanced IP conflict reports
+- User activity logs
+- IP reservation management
+- Advanced network analytics
+
+## ❤️ Support the Developer
+
+If this project helps you manage your ISP network, you can support its development through Chabondhu.
+
+<p align="center">
+  <a href="https://chabondhu.com/reemuree">
+    <img src="https://img.shields.io/badge/Support%20Development-Donate%20via%20Chabondhu-ff69b4?style=for-the-badge" alt="Donate via Chabondhu" />
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://chabondhu.com/reemuree">Donate via Chabondhu</a>
+</p>
+
+Every contribution is appreciated and helps support future development. ❤️
+
+
+
+## 📄 License
+
+Specify your preferred open-source license in the repository. If no license file is included, all rights remain with the copyright holder by default.
+
+---
+
+<p align="center">
+  Developed with ❤️ for MikroTik ISP Network Administrators.
+</p>
+
+<p align="center">
+  <b>MikroTik PPPoE IP Allocation Manager</b>
+</p>
