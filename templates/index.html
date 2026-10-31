@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <meta name="csrf-token" content="{{ csrf_token }}">
+  <title>PPPoE IP Manager</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <script src="{{ url_for('static', filename='js/vendor/chart.umd.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='js/app.js') }}" defer></script>
+</head>
+<body>
+<div class="app">
+
+  <aside class="sidebar" id="sidebar" aria-label="Main navigation">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">IP</span>
+      <div>
+        <div class="brand-name">PPPoE IP Manager</div>
+        <div class="brand-sub">MikroTik allocation</div>
+      </div>
+    </div>
+    <nav class="nav" id="nav">
+      <button class="nav-item" data-view="dashboard" type="button"><span class="nav-ico" aria-hidden="true">◧</span>Dashboard</button>
+      <button class="nav-item" data-view="all" type="button"><span class="nav-ico" aria-hidden="true">☰</span>IP inventory</button>
+      <button class="nav-item" data-view="assigned" type="button"><span class="nav-ico" aria-hidden="true">●</span>Assigned IPs</button>
+      <button class="nav-item" data-view="free" type="button"><span class="nav-ico" aria-hidden="true">○</span>Free IPs</button>
+      <button class="nav-item" data-view="reports" type="button"><span class="nav-ico" aria-hidden="true">⚑</span>Reports</button>
+      <button class="nav-item" data-view="networks" type="button"><span class="nav-ico" aria-hidden="true">⌘</span>Networks</button>
+    </nav>
+    <div class="sidebar-foot">
+      <div class="user"><span class="avatar" aria-hidden="true">{{ user[:1]|upper }}</span><span class="user-name">{{ user }}</span></div>
+      <form method="post" action="{{ url_for('logout') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="btn btn-ghost btn-sm" type="submit">Sign out</button>
+      </form>
+    </div>
+  </aside>
+  <div class="scrim" id="scrim" hidden></div>
+
+  <div class="main">
+    <header class="topbar">
+      <button class="icon-btn menu-btn" id="menuBtn" type="button" aria-label="Open menu" aria-controls="sidebar" aria-expanded="false">☰</button>
+      <h1 class="page-title" id="pageTitle">Dashboard</h1>
+      <div class="topbar-right">
+        <div class="conn" id="connPill" role="status" aria-live="polite">
+          <span class="dot dot-idle" id="connDot"></span>
+          <span class="conn-text" id="connText">Connecting…</span>
+        </div>
+        <span class="sync-time muted small" id="syncTime" title="Last successful synchronization">Never synced</span>
+        <label class="switch" title="Refresh automatically every 30 seconds">
+          <input type="checkbox" id="autoRefresh">
+          <span class="switch-track" aria-hidden="true"></span>
+          <span class="switch-label small">Auto 30s</span>
+        </label>
+        <button class="btn btn-primary btn-sm" id="refreshBtn" type="button">
+          <span class="spinner" id="refreshSpin" hidden></span><span id="refreshLabel">Refresh</span>
+        </button>
+        <button class="btn btn-sm" id="themeBtn" type="button" aria-label="Toggle light/dark theme" title="Toggle light/dark theme">Theme</button>
+      </div>
+    </header>
+
+    <div class="banner" id="banner" role="alert" hidden></div>
+
+    <main class="content" id="content">
+
+      <!-- ===================== Dashboard ===================== -->
+      <section class="view" id="view-dashboard" hidden>
+        <div class="empty" id="dashSetup" hidden>
+          <div class="empty-title">Choose which networks to monitor</div>
+          <p class="muted">Routes were read from the router. Select the customer address ranges to track; default and host routes are ignored automatically.</p>
+          <button class="btn btn-primary" type="button" data-goto="networks">Select networks</button>
+        </div>
+
+        <div id="dashBody" hidden>
+          <div class="grid-main">
+            <article class="card util-card">
+              <header class="card-head"><h2>IP utilization</h2><span class="muted small" id="utilNote"></span></header>
+              <div class="util-wrap">
+                <div class="chart-box"><canvas id="doughnut" aria-label="Assigned versus free IP addresses" role="img"></canvas>
+                  <div class="chart-center"><div class="chart-pct" id="utilPct">0%</div><div class="muted small">utilized</div></div>
+                </div>
+                <ul class="legend" id="legend"></ul>
+              </div>
+              <div class="meter" aria-hidden="true"><div class="meter-fill" id="meterFill"></div></div>
+            </article>
+
+            <div class="stats" id="stats"></div>
+          </div>
+
+          <article class="card">
+            <header class="card-head"><h2>Monitored networks</h2><span class="muted small">Assigned vs. free per network</span></header>
+            <div id="netBars" class="net-bars"></div>
+          </article>
+
+          <p class="note" id="freeNote">
+            <strong>About “Free”:</strong> an IP marked Free is free from <em>known PPPoE assignments</em> and monitored conflicts
+            (secrets, active sessions, reservations). It is not guaranteed to be unused by every other service on your network.
+          </p>
+        </div>
+      </section>
+
+      <!-- ===================== IP table (inventory / assigned / free) ===================== -->
+      <section class="view" id="view-ips" hidden>
+        <p class="note" id="ipsFreeNote" hidden>
+          <strong>About “Free”:</strong> free from known PPPoE assignments and monitored conflicts only. It is not guaranteed unused by every service on the network.
+        </p>
+        <div class="toolbar">
+          <label class="search">
+            <span class="sr-only">Search IPs</span>
+            <input type="search" id="search" placeholder="Search IP, username, profile, comment…" autocomplete="off">
+          </label>
+          <label class="select" id="statusWrap"><span class="sr-only">Status</span>
+            <select id="statusFilter">
+              <option value="">All statuses</option>
+              <option value="assigned">Assigned</option>
+              <option value="free">Free</option>
+              <option value="reserved">Reserved</option>
+              <option value="conflict">Conflict</option>
+              <option value="active_unconfigured">Active unconfigured</option>
+              <option value="unknown">Unknown</option>
+            </select>
+          </label>
+          <label class="select"><span class="sr-only">Network</span>
+            <select id="netFilter"><option value="">All networks</option></select>
+          </label>
+          <label class="select"><span class="sr-only">Rows per page</span>
+            <select id="pageSize">
+              <option>25</option><option>50</option><option>100</option><option>250</option>
+            </select>
+          </label>
+          <div class="export">
+            <span class="muted small">Export CSV</span>
+            <button class="btn btn-sm" type="button" data-export="all">All</button>
+            <button class="btn btn-sm" type="button" data-export="assigned">Assigned</button>
+            <button class="btn btn-sm" type="button" data-export="free">Free</button>
+          </div>
+        </div>
+
+        <div class="card table-card">
+          <div class="table-scroll">
+            <table class="table" id="ipTable">
+              <thead>
+                <tr>
+                  <th><button class="sort" data-sort="ip" type="button">IP address<span class="arrow"></span></button></th>
+                  <th><button class="sort" data-sort="status" type="button">Status<span class="arrow"></span></button></th>
+                  <th><button class="sort" data-sort="username" type="button">Username<span class="arrow"></span></button></th>
+                  <th><button class="sort" data-sort="profile" type="button">Profile<span class="arrow"></span></button></th>
+                  <th>Secret</th>
+                  <th><button class="sort" data-sort="session" type="button">Session<span class="arrow"></span></button></th>
+                  <th><button class="sort" data-sort="network" type="button">Network<span class="arrow"></span></button></th>
+                  <th><button class="sort" data-sort="route" type="button" title="Matching /ip route entry and its routing table">Route / table<span class="arrow"></span></button></th>
+                </tr>
+              </thead>
+              <tbody id="ipBody"></tbody>
+            </table>
+          </div>
+          <div class="empty" id="ipEmpty" hidden></div>
+          <div class="loading" id="ipLoading" hidden><span class="spinner spinner-lg"></span> Loading…</div>
+          <footer class="pager">
+            <span class="muted small" id="pageInfo"></span>
+            <div class="pager-btns">
+              <button class="btn btn-sm" id="pFirst" type="button" aria-label="First page">«</button>
+              <button class="btn btn-sm" id="pPrev" type="button">Prev</button>
+              <span class="small" id="pageNum"></span>
+              <button class="btn btn-sm" id="pNext" type="button">Next</button>
+              <button class="btn btn-sm" id="pLast" type="button" aria-label="Last page">»</button>
+            </div>
+          </footer>
+        </div>
+      </section>
+
+      <!-- ===================== Reports ===================== -->
+      <section class="view" id="view-reports" hidden>
+        <article class="card">
+          <header class="card-head"><h2>Out-of-range assignments <span class="count" id="oorCount">0</span></h2>
+            <span class="muted small">Secrets whose remote-address is outside every monitored network</span></header>
+          <div class="table-scroll"><table class="table"><thead><tr>
+            <th>Username</th><th>Remote address</th><th>Profile</th><th>Secret</th><th>Reason</th><th>Comment</th>
+          </tr></thead><tbody id="oorBody"></tbody></table></div>
+          <div class="empty" id="oorEmpty" hidden>No out-of-range assignments.</div>
+        </article>
+        <article class="card">
+          <header class="card-head"><h2>Disabled secrets <span class="count" id="disCount">0</span></h2>
+            <span class="muted small">Disabled secrets never claim an IP and are not counted as active sessions</span></header>
+          <div class="table-scroll"><table class="table"><thead><tr>
+            <th>Username</th><th>Remote address</th><th>Profile</th><th>In monitored range</th><th>Active session</th><th>Comment</th>
+          </tr></thead><tbody id="disBody"></tbody></table></div>
+          <div class="empty" id="disEmpty" hidden>No disabled secrets.</div>
+        </article>
+      </section>
+
+      <!-- ===================== Networks / settings ===================== -->
+      <section class="view" id="view-networks" hidden>
+        <article class="card">
+          <header class="card-head"><h2>Routes from router</h2>
+            <span class="muted small">Tick the customer networks to monitor. Default (0.0.0.0/0) and /32 host routes are hidden.</span></header>
+          <div class="table-scroll"><table class="table"><thead><tr>
+            <th class="col-check">Monitor</th><th>Network</th><th>Usable IPs</th><th>Gateway</th><th>Comment</th><th>Flags</th>
+          </tr></thead><tbody id="candBody"></tbody></table></div>
+          <div class="empty" id="candEmpty" hidden>No candidate routes were found. Add a network manually below.</div>
+        </article>
+
+        <article class="card pad">
+          <h2>Add network manually</h2>
+          <div class="inline-form">
+            <input type="text" id="manualNet" placeholder="e.g. 10.20.0.0/22" inputmode="text" autocomplete="off" aria-label="Network in CIDR notation">
+            <button class="btn" id="manualAdd" type="button">Add</button>
+          </div>
+          <ul class="chips" id="manualList"></ul>
+        </article>
+
+        <article class="card pad">
+          <h2>Reserved addresses</h2>
+          <p class="muted small">IPs or CIDR blocks excluded from allocation (gateways, servers, static devices). One per line or comma-separated.</p>
+          <textarea id="reservedText" rows="4" placeholder="10.10.10.1&#10;10.10.10.0/30" spellcheck="false"></textarea>
+        </article>
+
+        <article class="card pad">
+          <h2>Address limit</h2>
+          <p class="muted small">Protects server memory: networks that expand to more usable addresses than this are rejected.</p>
+          <div class="inline-form">
+            <input type="number" id="maxAddr" min="256" max="1048576" step="256" aria-label="Maximum monitored addresses">
+            <span class="muted small" id="addrSummary"></span>
+          </div>
+        </article>
+
+        <div class="actions">
+          <button class="btn btn-primary" id="saveNets" type="button">Save and apply</button>
+          <span class="muted small" id="saveHint"></span>
+        </div>
+      </section>
+
+    </main>
+  </div>
+</div>
+
+<div class="scrim drawer-scrim" id="drawerScrim" hidden></div>
+<aside class="drawer" id="userDrawer" role="dialog" aria-modal="true" aria-labelledby="drawerTitle" hidden>
+  <header class="drawer-head">
+    <div class="drawer-titles">
+      <h2 id="drawerTitle">PPPoE user</h2>
+      <div class="muted small" id="drawerSub"></div>
+    </div>
+    <button class="icon-btn" id="drawerClose" type="button" aria-label="Close details">×</button>
+  </header>
+  <div class="drawer-body" id="drawerBody"></div>
+</aside>
+
+<div class="toasts" id="toasts" aria-live="polite" aria-atomic="false"></div>
+</body>
+</html>

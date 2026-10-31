@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Sign in · PPPoE IP Manager</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="login-body">
+  <main class="login-card">
+    <div class="brand brand-login">
+      <span class="brand-mark" aria-hidden="true">IP</span>
+      <div>
+        <div class="brand-name">PPPoE IP Manager</div>
+        <div class="brand-sub">MikroTik allocation monitor</div>
+      </div>
+    </div>
+    <form method="post" action="{{ url_for('login') }}" autocomplete="on">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label class="field">
+        <span>Username</span>
+        <input type="text" name="username" autocomplete="username" required autofocus maxlength="64">
+      </label>
+      <label class="field">
+        <span>Password</span>
+        <input type="password" name="password" autocomplete="current-password" required>
+      </label>
+      {% if error %}<p class="form-error" role="alert">{{ error }}</p>{% endif %}
+      <button class="btn btn-primary btn-block" type="submit">Sign in</button>
+    </form>
+    <p class="muted small">Read-only access to your router. Administrator sign-in required.</p>
+  </main>
+</body>
+</html>
